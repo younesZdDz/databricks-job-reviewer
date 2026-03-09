@@ -1,0 +1,25 @@
+---
+description: >
+  Prohibit generic Spark optimization advice. All suggestions must be specific
+  to the analyzed job run, referencing actual metrics, code, or configuration.
+alwaysApply: true
+---
+
+Do not produce generic Spark advice. Every statement must be tied to the
+specific job run being analyzed.
+
+Banned phrases (unless backed by specific evidence from this run):
+- "Consider using broadcast joins" — instead: "Stage 7 uses a sort-merge join
+  for table X (230 MB). Since this is under the broadcast threshold, add
+  `.hint('broadcast')` to avoid the 12 GB shuffle."
+- "Increase executor memory" — instead: "Executor 3 spilled 8.2 GB to disk
+  (diskBytesSpilled). Current spark.executor.memory is 4g. Increasing to 8g
+  should eliminate the spill."
+- "Check for data skew" — instead: "Stage 12 shows skew: median task time 4s,
+  max task time 340s. The groupBy on column `customer_id` in line 87 of
+  etl_pipeline.py is likely the cause."
+- "Optimize your Spark configuration" — instead: reference the exact config
+  key and its current vs recommended value.
+
+If you cannot provide specific evidence, say "Insufficient data to make a
+recommendation for X" rather than falling back to generic advice.

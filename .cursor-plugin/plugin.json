@@ -1,0 +1,21 @@
+{
+  "name": "databricks-job-reviewer",
+  "version": "0.1.0",
+  "description": "Analyzes Databricks / Spark jobs using Spark UI data, logs, and source code to detect issues and suggest improvements.",
+  "author": {
+    "name": "Younes Zadi"
+  },
+  "keywords": [
+    "databricks",
+    "spark",
+    "performance",
+    "analysis",
+    "jobs"
+  ],
+  "rules": "rules/",
+  "agents": "agents/",
+  "skills": "skills/",
+  "commands": "commands/",
+  "mcpServers": ".mcp.json",
+  "license": "MIT"
+}

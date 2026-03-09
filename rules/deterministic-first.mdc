@@ -1,0 +1,28 @@
+---
+description: >
+  Enforce that deterministic, metric-based checks run before AI-driven analysis
+  when reviewing Spark jobs. Applies to any Databricks job analysis workflow.
+alwaysApply: true
+---
+
+When analyzing a Spark job run, always execute checks in this order:
+
+1. **Data collection** — gather all metrics, logs, and config via MCP tools first.
+   Never start reasoning before you have the data.
+
+2. **Deterministic checks** — apply threshold-based rules before any AI reasoning:
+   - Skew: max task time > 5x median → flag
+   - Spill: diskBytesSpilled > 0 → flag
+   - Shuffle explosion: shuffleWriteBytes > 5x inputBytes → flag
+   - Failed tasks: numFailedTasks > 0 → flag
+   - GC pressure: totalGCTime > 10% of totalDuration → flag
+   - Small files: inputBytes / numTasks < 1 MB → flag
+   - OOM in logs: any OutOfMemoryError → flag
+   - Timeout: execution duration > 2x historical median → flag
+
+3. **AI analysis** — only after deterministic checks, reason about root causes,
+   correlations, and non-obvious patterns.
+
+If a deterministic check fires, always include it in findings even if AI
+analysis suggests a different interpretation. The deterministic signal is
+primary evidence; AI reasoning provides context.

@@ -1,0 +1,24 @@
+---
+description: >
+  Every suggestion and finding must include concrete evidence from the actual
+  job run — metrics, log lines, or code references. No unsupported claims.
+alwaysApply: true
+---
+
+Every finding and recommendation must include evidence from the actual job run.
+
+Required for each finding:
+- At least one **specific metric** (e.g., "Stage 4 shuffleWriteBytes = 45 GB")
+- The **source** of the metric (which MCP tool call produced it)
+- A **comparison baseline** when possible (previous run, expected value, threshold)
+
+Prohibited:
+- "This could be causing issues" without citing a metric
+- "Consider increasing memory" without showing current memory usage and evidence of pressure
+- "The join might be inefficient" without referencing the SQL plan or stage metrics
+- Any recommendation that doesn't reference data from this specific job run
+
+When evidence is ambiguous or incomplete, state clearly:
+- What data you have
+- What data is missing
+- What confidence level you assign (High / Medium / Low)
