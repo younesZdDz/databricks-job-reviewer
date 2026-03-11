@@ -8,8 +8,8 @@ alwaysApply: true
 Every finding and recommendation must include evidence from the actual job run.
 
 Required for each finding:
-- At least one **specific metric** (e.g., "Stage 4 shuffleWriteBytes = 45 GB")
-- The **source** of the metric (which MCP tool call produced it)
+- At least one **specific metric** (e.g., "Stage 4 shuffleWriteBytes = 45 GB", or "p99 task runtime 340s vs p50 4s")
+- The **source** of the metric (which MCP tool or API produced it)
 - A **comparison baseline** when possible (previous run, expected value, threshold)
 
 Prohibited:

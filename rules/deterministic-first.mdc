@@ -10,8 +10,9 @@ When analyzing a Spark job run, always execute checks in this order:
 1. **Data collection** — gather all metrics, logs, and config via MCP tools first.
    Never start reasoning before you have the data.
 
-2. **Deterministic checks** — apply threshold-based rules before any AI reasoning:
-   - Skew: max task time > 5x median → flag
+2. **Deterministic checks** — apply threshold-based rules before any AI reasoning.
+   Use task summary quantiles (p01, p50, p99) when available; prefer p50/p99 over averages for skew.
+   - Skew: p99 task time > 5x p50 (or max task time > 5x median) → flag
    - Spill: diskBytesSpilled > 0 → flag
    - Shuffle explosion: shuffleWriteBytes > 5x inputBytes → flag
    - Failed tasks: numFailedTasks > 0 → flag

@@ -1,26 +1,21 @@
 ---
 description: >
-  When source code is available as a local file, always attempt to link
-  runtime issues (slow stages, errors, skew) back to specific code locations.
-  Applies to all Spark job analysis when the user provides a source file path.
+  The user must provide a code file path. Always link runtime issues
+  (slow stages, errors, skew) back to specific code locations (file:line).
+  Applies to all Spark job analysis.
 alwaysApply: true
 ---
 
-When source code is available (the user provides a local file path), always
-connect runtime observations to code:
+The user provides a code file path (required). Always connect runtime
+observations to code:
 
-1. **Map stages to code**: Use SQL plan node names and stage descriptions to
-   identify which transformation in the code produced each stage. Include
-   file name and line number.
+1. **Map stages to code**: Use the chosen SQL execution’s physical plan (e.g. Exchange, SortMergeJoin) and job/stage ids to identify which transformation produced each stage. Include file name and line number.
 
 2. **Map errors to code**: When logs contain stack traces referencing user code
    (not Spark internals), identify the exact file and line. If the error is in
    a UDF, identify the UDF definition.
 
-3. **Map regressions to diffs**: When comparing runs, if a regression is
-   detected and the user provides a previous version of the file, diff the
-   two versions and check if any code change aligns with the performance
-   difference. Specifically check:
+3. **Map regressions to diffs**: When comparing two applications (or runs), if a regression is detected and the user provides a previous version of the file, diff the two versions and check if any code change aligns with the performance difference. Specifically check:
    - Changed join conditions or predicates
    - Added/removed caching
    - Changed repartition/coalesce
@@ -31,6 +26,4 @@ connect runtime observations to code:
 4. **Format**: Always present code links as:
    `<file_path>:<line_number>` — `<brief description of the relevant code>`
 
-If source code is not provided, explicitly state: "Source code was not
-provided for this analysis. Recommendations are based on runtime data only.
-Provide the job file path to enable code-level correlation."
+The code file path is required for this plugin; do not proceed without it.

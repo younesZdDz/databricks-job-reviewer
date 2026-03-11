@@ -1,48 +1,41 @@
 ---
 name: detect-skew
 description: >
-  Detect data skew in Spark jobs by analyzing task-level timing distribution,
-  partition sizes, and executor workload imbalance. Use when a job has a few
-  tasks running much longer than the rest, or when one executor is overloaded.
+  Detect data skew using task-level quantiles (p01/p50/p99), stage metrics,
+  and executor workload. Use when a stage has long-tail tasks or one executor
+  is overloaded. Prefer quantiles first, then task list and executors.
 ---
 
 # Detect Skew
 
 ## When to Use
 
-- A stage has a few tasks taking much longer than others
-- One executor has significantly higher shuffle read/write than peers
+- A stage has a few tasks much slower than the rest (long tail)
+- One executor has much higher shuffle read/write or duration than others
 - A join or aggregation is unexpectedly slow
-- The job has a "long tail" where most tasks finish fast but a few straggle
+- Quantiles from `get_stage_task_summary` or `get_stage_attempt` show p99 >> p50
 
 ## Instructions
 
-1. Call `get_spark_stages` and look for stages where:
-   - The stage has many completed tasks but is still slow
-   - `shuffleReadBytes` or `shuffleWriteBytes` is very high
-2. Call `get_spark_executors` and check for imbalance:
-   - Compare `totalShuffleRead` across executors — flag if max > 3x median
-   - Compare `totalTasks` across executors — flag if max > 2x median
-   - Compare `totalDuration` across executors
-3. If SQL queries exist, call `get_spark_sql_queries` and identify:
-   - Join operations (most common skew source)
-   - GroupBy / aggregation on low-cardinality keys
-   - Window functions with uneven partitioning
-4. Determine skew type:
+1. **Use quantiles first**: For the stage in question, call `get_stage_task_summary` (or `get_stage_attempt` with `withSummaries=true`) with `quantiles=0.01,0.5,0.99`. If p99 runtime or p99 shuffle read is much larger than p50, treat as skew/stragglers.
+2. **Executor imbalance**: Call `get_all_executors` (or `get_executors`). Compare totalShuffleRead, totalDuration, totalGCTime across executors. Flag if max > 3x median for shuffle or tasks.
+3. **Correlate with execution**: If you have a SQL execution, use the plan (join, aggregation, window) to identify the operation causing skew. If you have a job, use job detail to see which stage is the join/aggregation.
+4. **Task list only if quantiles show a problem**: Use `get_stage_task_list` with `sortBy=-runtime` and small length to list the worst tasks (executorRunTime, shuffle read, GC, spill).
+5. **Classify skew type**:
    - **Join skew**: one join key has disproportionate rows
-   - **Aggregation skew**: a few group keys contain most of the data
-   - **Read skew**: input data has uneven partition sizes
-5. Suggest targeted fixes:
-   - For join skew: salting the skewed key, broadcast join if one side is small, or AQE skew join optimization
-   - For aggregation skew: two-phase aggregation (partial + final)
-   - For read skew: repartition input data, adjust file sizes
-   - Always check if `spark.sql.adaptive.skewJoin.enabled` is set
+   - **Aggregation skew**: few group keys have most of the data
+   - **Read skew**: input partitions have very different sizes
+6. **Suggest fixes** (with evidence from this app):
+   - Join skew: salting skewed key, broadcast join if one side is small, AQE skew join
+   - Aggregation skew: two-phase aggregation
+   - Read skew: repartition input, adjust file/partition sizes
+   - Check if `spark.sql.adaptive.skewJoin.enabled` is set
 
-## Skew Detection Thresholds
+## Thresholds
 
 | Signal | Threshold | Severity |
-|---|---|---|
-| Max task time > 5x median | Definite skew | High |
-| Max task time > 3x median | Likely skew | Medium |
-| One executor shuffle > 3x median | Executor-level skew | High |
-| One partition > 2 GB | Partition too large | Medium |
+|--------|-----------|----------|
+| p99 task runtime > 5x p50 | Definite skew | High |
+| p99 task runtime > 3x p50 | Likely skew | Medium |
+| One executor shuffle/duration > 3x median | Executor-level skew | High |
+| Single partition / task input >> median | Large partition | Medium |

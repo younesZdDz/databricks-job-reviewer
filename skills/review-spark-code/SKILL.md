@@ -2,65 +2,49 @@
 name: review-spark-code
 description: >
   Review Spark job source code (PySpark, Scala, SQL) for performance
-  anti-patterns, inefficient transformations, and potential causes of
-  runtime issues. Use when the user provides a local file path for the
-  job source code and you need to correlate code patterns with runtime behavior.
+  anti-patterns and correlate with runtime (stages, SQL plan, quantiles).
+  Use when the user provides a local file path and you have app metrics.
 ---
 
 # Review Spark Code
 
 ## When to Use
 
-- The user provides a local file path for the Spark job source code
-- You need to correlate runtime issues with code
-- Reviewing code for known Spark anti-patterns
-- Investigating whether a code change caused a regression
+- The user provides the code file path (required) for the Spark job source
+- You need to link runtime issues (slow stages, skew, spill, errors) to code
+- Reviewing for known Spark anti-patterns
+- Checking if a code change could explain a regression
 
 ## Instructions
 
-1. Read the job source code from the local file path the user provides
-   (use the Read tool — the file is in the workspace or on disk).
-2. Scan the code for these anti-patterns:
+1. **Read the code** from the path the user gave (Read tool).
+2. **Map runtime to code**: Use the chosen SQL execution’s physical plan and job/stage ids to identify which transformations correspond to which stages (e.g. Exchange → shuffle stage, SortMergeJoin → join stage). Cite `<file_path>:<line>` for the relevant code.
+3. **Scan for anti-patterns** and tie each to metrics when possible:
 
-### Critical Anti-Patterns
+### Critical
 
-| Pattern | Why it's bad | Fix |
-|---|---|---|
-| `.collect()` on large datasets | Pulls all data to driver, causes OOM | Use `.take(n)`, aggregate first, or write to storage |
-| `.count()` used only for logging | Triggers a full job just to log a number | Remove or use accumulator |
-| Repeated reads of the same data | Recomputes expensive lineage | `.cache()` or `.persist()` the DataFrame |
-| `df.repartition(1)` before write | Single partition = single task, no parallelism | Use `.coalesce()` or appropriate partition count |
-| UDFs in PySpark | Serialization overhead, no Catalyst optimization | Rewrite with built-in Spark SQL functions |
-| `.toPandas()` on large data | Collects to driver memory | Use `.mapInPandas()` or Spark native ops |
-| Cross joins (explicit or implicit) | Cartesian product, O(n*m) rows | Add join condition or filter early |
-| No predicate pushdown | Reading all data then filtering | Push filters to source (partition pruning) |
-| Schema inference on large CSV/JSON | Extra scan pass to infer types | Provide explicit schema |
+| Pattern | Why it’s bad | Fix |
+|--------|---------------|-----|
+| `.collect()` on large data | Driver OOM | `.take(n)`, aggregate first, or write to storage |
+| `.count()` only for logging | Full job for a number | Remove or use accumulator |
+| Repeated reads of same data | Recomputes lineage | `.cache()` / `.persist()` |
+| `df.repartition(1)` before write | Single task, no parallelism | `.coalesce()` or sane partition count |
+| UDFs in PySpark | Serialization, no Catalyst | Prefer built-in SQL functions |
+| `.toPandas()` on large data | Driver memory | `.mapInPandas()` or Spark native |
+| Cross joins | Cartesian product | Add condition or filter early |
+| No predicate pushdown | Read all then filter | Push filters to source |
+| Schema inference on large CSV/JSON | Extra scan | Explicit schema |
 
-### Shuffle-Related Patterns
+### Shuffle-related
 
-| Pattern | Issue |
-|---|---|
-| `.groupBy().agg()` on skewed keys | Skew → straggler tasks |
-| Multiple `.join()` without broadcast hint | Unnecessary sort-merge joins |
-| `.distinct()` before join | May add unnecessary shuffle |
-| `.orderBy()` before write to non-sorted sink | Unnecessary global sort |
+- `.groupBy().agg()` on skewed keys → skew and stragglers
+- Multiple `.join()` without broadcast hint → sort-merge and shuffle
+- `.distinct()` before join → extra shuffle
+- `.orderBy()` before write to non-sorted sink → unnecessary global sort
 
-3. If investigating a regression, ask the user for the previous version of
-   the file or a diff, then compare:
-   - Changes to transformations, joins, aggregations
-   - Added/removed `.cache()`, `.repartition()`, `.coalesce()`
-   - New data sources or changed filter predicates
-   - Spark config changes in the code
+4. **Correlate**: For each finding, link to a stage id, SQL execution id, or metric (e.g. “Stage 4 shuffle write 45 GB aligns with the wide join at file.py:87”).
+5. **Output**: Code location (file:line), pattern, runtime correlation (metric/stage/error), suggested rewrite.
 
-4. Correlate code findings with runtime data:
-   - Map slow stages to specific transformations in the code
-   - Match OOM errors to `.collect()` or `.toPandas()` calls
-   - Connect shuffle explosion to join/groupBy operations
+## Note
 
-## Output Structure
-
-For each code issue:
-- **Code location**: file path, line number, function
-- **Pattern**: which anti-pattern was detected
-- **Runtime correlation**: which metric/stage/error this relates to
-- **Suggested rewrite**: concrete code change with before/after
+The code file path is required; the agent should not run analysis without it.

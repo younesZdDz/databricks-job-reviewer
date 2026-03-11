@@ -1,27 +1,28 @@
 # Databricks Job Reviewer : Cursor Plugin
 
-A Cursor plugin that analyzes Databricks / Spark jobs using Spark UI data, job logs, and local source code. It detects issues and suggests concrete improvements directly in your agent conversation.
+A Cursor plugin that analyzes Spark applications on Databricks using the **driver-proxy Spark UI API** (`/api/v1`). It follows a **SQL → jobs → heaviest stages → quantiles → tasks/executors** workflow, detects issues with evidence, and suggests concrete improvements. You provide the task code file (required); findings are linked to file:line.
 
 ## What it does
 
-Given a Databricks job run, the plugin:
+Given **cluster_id**, **code file path** (required), and optional **app_id**, the plugin:
 
-1. **Fetches runtime data** : stages, executors, SQL plans, logs, and cluster config via a custom MCP server
-2. **Reads your job source code** : from a local file you provide (e.g. notebook or Python script)
-3. **Runs deterministic checks** : skew, spill, shuffle explosion, failures, GC pressure
-4. **Performs AI-driven root cause analysis** : connects metrics to code and config
-5. **Produces a structured report** : findings with evidence, severity, and actionable recommendations
+1. **Resolves the Spark application** : uses the first app on the cluster if app_id is omitted
+2. **Starts from the right anchor** : ranks SQL executions by duration (or uses jobs directly), then inspects associated jobs and heaviest stages
+3. **Uses quantiles first** : task summary with p01/p50/p99 to detect skew before opening the full task list
+4. **Runs deterministic checks** : skew (p99 vs p50), spill, shuffle explosion, failures, GC pressure, executor imbalance
+5. **Performs AI-driven analysis** : connects metrics to code and config (code file required)
+6. **Produces a structured report** : findings with evidence, severity, and actionable recommendations
 
 ### Example findings
 
 | Type | What you get |
 |------|----------------|
 | **Slowdown** | Root cause with evidence (e.g. “2.3x slower due to skew in Stage 12”) |
-| **Data skew** | Affected stage, keys, and skew ratio; code location when source is provided |
+| **Data skew** | p99 vs p50 from task summary; stage and code location (file:line) |
 | **Shuffle explosion** | Tied to a join or aggregation in your code |
 | **Memory / spill** | Disk spill metrics and suggested executor memory or partitioning |
-| **Join efficiency** | Sort-merge vs broadcast with evidence from plans |
-| **Anti-patterns** | `.collect()`, UDFs, cross joins, bad repartition : with file:line when you attach source |
+| **Join efficiency** | Sort-merge vs broadcast with evidence from SQL plan |
+| **Anti-patterns** | `.collect()`, UDFs, cross joins, bad repartition : with file:line (code file required) |
 
 ---
 
@@ -43,226 +44,87 @@ export DATABRICKS_TOKEN="dapi..."
 ```
 
 - **DATABRICKS_HOST** : Your workspace URL (no trailing slash).
-- **DATABRICKS_TOKEN** : A [Databricks personal access token](https://docs.databricks.com/en/dev-tools/auth/pat.html) with at least “Job” and “Cluster” read access.
+- **DATABRICKS_TOKEN** : A [Databricks personal access token](https://docs.databricks.com/en/dev-tools/auth/pat.html). For driver-proxy and cluster info: at least **Cluster** read access.
 
-If Cursor doesn’t inherit your shell env, you may need to set these in your OS user environment or in Cursor’s MCP server config (Settings → MCP → databricks → env).
+If Cursor doesn’t inherit your shell env, set these in your OS user environment or in Cursor’s MCP server config (Settings → MCP → databricks → env).
 
 ### 3. Verify
 
 - **Settings → Rules**: You should see the plugin’s rules (e.g. deterministic-first, evidence-based).
 - **Settings → MCP**: The `databricks` server should be listed and show a green status.
-- In **Agent chat**, type `/` : you should see: `/analyze-latest-run`, `/analyze-specific-run`, `/compare-runs`, `/review-job-performance`.
+- In **Agent chat**, type `/` : you should see: `/review-spark-job`.
 
 ---
 
-## Usage : Commands and examples
+## Usage : One command
 
-All usage happens in **Cursor Agent chat**. Use the slash commands below; the agent will ask for job ID or run ID and, when relevant, an optional **source file** (e.g. `@src/jobs/daily_etl.py`) for code-level analysis.
+All usage happens in **Cursor Agent chat**. One command does both **analysis** (runtime: SQL/jobs → stages → quantiles → executors) and **code review** (anti-patterns, file:line links).
 
-### Command reference
+### Command
 
-| Command | When to use |
+| Command | What it does |
 |--------|----------------|
-| `/analyze-latest-run` | Investigate the most recent run of a job (e.g. after a failure or slowdown). |
-| `/analyze-specific-run` | Deep-dive a specific run by ID (e.g. from an alert or link). |
-| `/compare-runs` | Compare two runs to find regressions (e.g. “good” vs “bad” run). |
-| `/review-job-performance` | Performance review over recent run history (trends, recurring issues, config). |
+| `/review-spark-job` | Analyze the Spark application and review the task code in one flow. |
 
----
+**Inputs:**
 
-### Example 1: Analyze the latest run (quick check after a failure)
-
-**In Agent chat:**
-
-```
-/analyze-latest-run
-```
-
-When prompted:
-
-- **Job ID:** `123456`
-- **Source file (optional):** `@src/jobs/daily_etl.py` : include this to link findings to your code.
-
-**Example output (shortened):**
-
-```text
-# Job Run Analysis : Run 987654
-
-## Overview
-Run 987654 of job "daily_etl" completed in 47 min (2.3x slower than the 7-day median of 20 min).
-Root cause: data skew in the customer join stage and shuffle explosion from an unfiltered cross-product.
-
-## Findings
-
-### Finding: Data Skew in Stage 12 (SortMergeJoin)
-Severity: Critical | Confidence: High
-
-Evidence:
-- Stage 12 median task time: 8s, max: 412s (51x skew ratio)
-- shuffleReadBytes on executor 7: 34 GB vs median 2.1 GB
-- groupBy on `customer_id` : top key has 12M rows vs median 200
-
-Suggested fix:
-  spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-  # daily_etl.py:38 : add salting before the join
-  df = df.withColumn("salt", (F.rand() * 10).cast("int"))
-
-### Finding: Disk Spill in Stage 8
-Severity: High | Confidence: High
-
-Evidence:
-- diskBytesSpilled = 18.4 GB across 200 tasks
-- spark.executor.memory = 4g, peak execution memory = 7.2 GB
-
-Suggested fix: Increase executor memory to 8g (or add more partitions).
-
-## Recommendations
-1. Enable AQE skew join (Critical)
-2. Increase executor memory 4g → 8g (High)
-3. Add partition filter on `date` before join : daily_etl.py:25 (Medium)
-```
-
----
-
-### Example 2: Analyze a specific run (from an alert or link)
-
-Use when you have an exact run ID (e.g. from the Databricks UI or an alert).
+- **cluster_id** (required): Databricks cluster ID.
+- **Code file path** (required): Local path to the task/job source (e.g. `@src/jobs/daily_etl.py`).
+- **app_id** (optional): Spark application ID. If omitted, the latest application is used (first from the cluster).
 
 **In Agent chat:**
 
 ```
-/analyze-specific-run
+/review-spark-job
 ```
 
 When prompted:
 
-- **Run ID:** `987654`
-- **Source file (optional):** `@notebooks/daily_etl.py`
+- **cluster_id:** `0123-456789-abcdef`
+- **Code file path:** `@src/jobs/daily_etl.py`
+- **app_id:** (optional : leave blank to use the latest app on the cluster)
 
-Same style of report as Example 1, but scoped to that run.
-
----
-
-### Example 3: Compare two runs (find what regressed)
-
-Use to compare a “good” baseline run with a “bad” run.
-
-**In Agent chat:**
-
-```
-/compare-runs
-```
-
-When prompted:
-
-- **Baseline run (good):** `987600`
-- **Target run (bad):** `987654`
-- **Source file (optional):** `@src/jobs/daily_etl.py`
-
-**Example output (shortened):**
-
-```text
-# Run Comparison : 987600 vs 987654
-
-## Duration
-- Run A (baseline): 19 min 42s
-- Run B (target):   47 min 11s
-- Difference:       +27 min 29s (+139%)
-
-## What changed
-- Stage 12 (SortMergeJoin): 3 min → 28 min : skew on `customer_id`
-- Stage 8 (HashAggregate):  2 min → 8 min : disk spill (0 → 18.4 GB)
-- Cluster config: identical
-- Input volume: 120 GB → 310 GB (date range expanded in daily_etl.py:22)
-
-## Code diff correlation
-- daily_etl.py:22 : filter changed from last 7 days to last 30 days
-- daily_etl.py:38 : join on `customer_id` unchanged; more data exposed skew
-
-## Recommendations
-1. Restore 7-day filter or scale partitions
-2. Enable AQE skew join for customer_id
-3. Increase executor memory for larger working set
-```
-
----
-
-### Example 4: Review overall job performance (health and trends)
-
-Use for a periodic health check or before changing config.
-
-**In Agent chat:**
-
-```
-/review-job-performance
-```
-
-When prompted:
-
-- **Job ID:** `123456`
-
-**Example output (shortened):**
-
-```text
-# Job Performance Review : "daily_etl" (Job 123456)
-
-## Health summary
-- Last 20 runs: 17 succeeded, 3 failed (85% success rate)
-- Avg duration: 22 min | Min: 18 min | Max: 47 min
-- Trend: duration increasing ~3 min/week
-- Failure pattern: all 3 failures OOM on Stage 8
-
-## Recurring issues
-1. Executor OOM on Stage 8 in 3/20 runs : memory borderline at 4g
-2. Skew on customer_id in 8/20 runs (intermittent hot keys)
-
-## Configuration review
-- spark.executor.memory = 4g : undersized for current volume
-- spark.sql.adaptive.enabled = true; skewJoin not enabled
-- Autoscaling: min 2, max 10 : min could be 4
-
-## Recommendations
-1. Increase spark.executor.memory to 8g
-2. Enable spark.sql.adaptive.skewJoin.enabled
-3. Set autoscale min workers to 4
-4. Add alert when duration exceeds 30 min
-```
+The agent resolves the app (or uses your app_id), runs the full workflow (SQL/jobs → heaviest stages → quantiles → task list if needed → executors), reads your code, reviews for anti-patterns, and produces one report with findings linked to file:line.
 
 ---
 
 ## Reference
 
-### MCP tools (Databricks)
+### MCP tools (driver-proxy Spark UI + cluster)
 
-The plugin’s MCP server exposes these tools (used by the agent under the hood):
+The MCP server uses the **driver-proxy** base URL:  
+`https://{DATABRICKS_HOST}/driver-proxy-api/o/0/{cluster_id}/40001/api/v1`
 
 | Tool | Description |
 |------|-------------|
-| `list_job_runs` | List recent job runs (optional job ID filter) |
-| `get_run_details` | Full details of a run |
-| `get_run_output` | Run output, errors, notebook results |
-| `get_spark_stages` | Stage metrics (timing, shuffle, spill) |
-| `get_spark_executors` | Executor metrics (memory, GC, tasks) |
-| `get_spark_sql_queries` | SQL query execution data |
-| `get_spark_sql_plan` | Physical/logical plan for a SQL execution |
-| `get_run_logs` | Driver logs and error traces |
-| `get_job_config` | Job config (cluster, tasks, libraries) |
-| `get_cluster_info` | Cluster configuration and state |
-| `compare_runs` | Side-by-side comparison of two runs |
+| `list_applications` | List Spark applications on the cluster (optional date/limit filters) |
+| `get_application` | Details for one application |
+| `get_sql_executions` | List SQL executions (rank by duration); best entry for SQL/DataFrame workloads |
+| `get_sql_execution` | One SQL execution with plan and associated job ids |
+| `get_jobs` | List jobs for the application |
+| `get_job_detail` | One job: stages, durations, shuffle, I/O |
+| `get_stages` | List stages (prefer narrowing by job first) |
+| `get_stage_attempt` | Stage attempt with quantiles (use before task list) |
+| `get_stage_task_summary` | Task summary quantiles (p01/p50/p99) to detect skew |
+| `get_stage_task_list` | Task list (use only after quantiles show a problem; sortBy=-runtime) |
+| `get_executors` | Active executors |
+| `get_all_executors` | All executors (active + dead) for imbalance and GC |
+| `get_environment` | Application environment (Spark config, JVM) |
+| `get_cluster_info` | Cluster config and state (Databricks API) |
 
 ### Rules (always-on guidance)
 
-- **Deterministic first** : Metric-based checks run before AI analysis.
+- **Deterministic first** : Metric-based checks (including quantiles) before AI analysis.
 - **Evidence-based** : Every finding cites specific metrics or log lines.
 - **No generic advice** : No vague suggestions without evidence.
 - **Link runtime to code** : Connect stage/issues to specific code lines when source is provided.
 
 ### Skills (agent capabilities)
 
-- **analyze-spark-stages** : Bottleneck stages, throughput, spill.
-- **detect-skew** : Task/executor skew, skewed join/group keys.
-- **analyze-logs** : Parse errors, classify failures (OOM, connectivity, data), stack traces.
-- **review-spark-code** : Anti-patterns: collect, UDFs, cross joins, bad repartition.
+- **analyze-spark-stages** : Bottleneck stages; quantiles first, then task list; shuffle/spill.
+- **detect-skew** : Task/executor skew using quantiles and executor metrics.
+- **analyze-logs** : Parse user-provided logs; errors, OOM, stack traces; correlate with stage/executor data.
+- **review-spark-code** : Anti-patterns and correlation with runtime (stages, SQL plan).
 
 ---
 
@@ -272,7 +134,7 @@ The plugin’s MCP server exposes these tools (used by the agent under the hood)
 databricks-job-reviewer/
 ├── .cursor-plugin/
 │   └── plugin.json
-├── .mcp.json
+├── mcp.json
 ├── mcp-servers/databricks/
 │   ├── server.py
 │   └── requirements.txt
@@ -286,8 +148,6 @@ databricks-job-reviewer/
 ---
 
 ## For contributors : Local development
-
-Use this when you clone the repo to change the plugin or the MCP server.
 
 ### Prerequisites
 
@@ -336,21 +196,21 @@ Optional : run with the MCP CLI inspector (browser UI to call tools):
 mcp dev mcp-servers/databricks/server.py
 ```
 
+Note: Most tools require a valid **cluster_id** (and optional **app_id**). Use a running cluster’s ID from your workspace.
+
 ### 4. Load the plugin in Cursor (local dev)
 
-Cursor does **not** have an “Import plugin from folder” option. The plugin is loaded when the **workspace root** is the folder that contains `.cursor-plugin/`.
-
-1. In Cursor: **File → Open Folder** and select the `databricks-job-reviewer` directory (the one that contains `.cursor-plugin/`). Do not open a parent or a subfolder.
+1. In Cursor: **File → Open Folder** and select the `databricks-job-reviewer` directory (the one that contains `.cursor-plugin/`).
 2. Use **Developer: Reload Window** from the Command Palette if the plugin doesn’t appear.
-3. Check **Settings → Rules** (plugin rules listed), **Settings → MCP** (`databricks` green), and in Agent chat type `/` (four commands).
+3. Check **Settings → Rules**, **Settings → MCP** (`databricks` green), and in Agent chat type `/` (the `/review-spark-job` command).
 
-The MCP server is started by Cursor using `.mcp.json`; it runs with Cursor’s `python3` and needs `DATABRICKS_HOST` and `DATABRICKS_TOKEN` in your environment (or set where Cursor reads env for MCP).
+The MCP server is started by Cursor using `mcp.json`; it needs `DATABRICKS_HOST` and `DATABRICKS_TOKEN` in the environment (or where Cursor reads env for MCP).
 
 ### 5. Project layout for contributors
 
 | Directory | What to edit | Format |
 |-----------|----------------|--------|
-| `mcp-servers/databricks/` | MCP tools (Databricks API) | Python, `@mcp.tool()` |
+| `mcp-servers/databricks/` | MCP tools (driver-proxy + cluster API) | Python, `@mcp.tool()` |
 | `agents/` | Subagent behavior/prompt | Markdown + YAML frontmatter |
 | `skills/` | Analysis skills | `SKILL.md` in named subdirs |
 | `rules/` | Always-on rules | `.mdc` + YAML frontmatter |
@@ -358,7 +218,7 @@ The MCP server is started by Cursor using `.mcp.json`; it runs with Cursor’s `
 
 ### 6. Adding a new MCP tool
 
-1. Edit `mcp-servers/databricks/server.py`, add a function with `@mcp.tool()`, return a `str` (e.g. via `_fmt()` for JSON).
+1. Edit `mcp-servers/databricks/server.py`, add a function with `@mcp.tool()`, return a `str` (e.g. via `_fmt()` for JSON). Use `_get_proxy(cluster_id, path, params)` for Spark UI and `_get(path, params)` for Databricks REST (e.g. cluster).
 2. Restart the MCP server in Cursor (Settings → MCP → toggle databricks off/on).
 
 ### 7. Adding a new skill

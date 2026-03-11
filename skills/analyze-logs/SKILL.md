@@ -1,63 +1,53 @@
 ---
 name: analyze-logs
 description: >
-  Analyze Databricks job logs to identify errors, warnings, OOM events,
-  driver/executor failures, and stack traces. Use when a job has failed,
-  thrown exceptions, or produced suspicious log output.
+  Analyze Spark/job logs for errors, OOM, executor failures, and stack traces.
+  Use when the user provides log content, run output, or event log references;
+  correlate with stage/executor metrics from the MCP when available.
 ---
 
 # Analyze Logs
 
 ## When to Use
 
-- A job run has failed or been marked with errors
-- You need to understand why an executor was lost
-- Looking for OOM (OutOfMemory) evidence
-- Investigating unexpected exceptions or warnings
-- Checking for connectivity or dependency issues
+- User provides log content (driver logs, run output, or error paste)
+- An application shows failed stages or executors in the UI/API
+- Investigating OOM, executor loss, or unexpected exceptions
+- Correlating stack traces with stage/task failures from `get_stage_attempt` or `get_all_executors`
 
 ## Instructions
 
-1. Call `get_run_logs` with the run ID to fetch driver logs and error traces.
-2. Call `get_run_output` for notebook output and structured error info.
-3. Parse the logs for these critical patterns:
+1. **Obtain logs**: Use whatever the user provides (driver log, run output, stack trace). The MCP does not fetch run logs; analysis is on user-provided log content or on metrics (failed tasks, executor loss) from the proxy API.
+2. **Parse and classify**:
 
-### Error Classification
+### Fatal / OOM
 
-Scan logs top-down and classify issues:
-
-**Fatal / OOM**
 - `java.lang.OutOfMemoryError`
-- `Container killed by YARN for exceeding memory limits`
+- Container killed for exceeding memory limits
 - `ExecutorLostFailure` with memory-related reasons
 
-**Connectivity**
+### Connectivity
+
 - `Connection refused`, `Connection reset`
-- `TimeoutException` on external service calls
-- JDBC/metastore connectivity errors
+- `TimeoutException` on external calls
+- JDBC/metastore errors
 
-**Data Issues**
-- `FileNotFoundException` — missing input data
-- `AnalysisException` — schema mismatch or missing columns
-- `SparkUpgradeException` — behavior change across Spark versions
+### Data
 
-**Resource Contention**
-- `FetchFailedException` — shuffle service failure, often from executor death
-- `TaskKilled` — preempted or OOM-killed
-- Repeated `WARN` about full memory pools
+- `FileNotFoundException` — missing input
+- `AnalysisException` — schema/missing columns
+- `SparkUpgradeException` — version behavior change
 
-4. For each error found:
-   - Extract the full stack trace
-   - Identify the originating class/method
-   - Check if it's a driver-side or executor-side error
-   - Correlate with stage/task failures from Spark UI data
-5. If the error references user code (non-Spark-internal frames), note the exact class and line number for code review.
+### Resource / shuffle
 
-## Output Structure
+- `FetchFailedException` — shuffle or executor death
+- `TaskKilled` — preemption or OOM
+- WARN about full memory pools
 
-For each log issue found:
-- **Error type**: classification from above
-- **Location**: driver or executor, stage ID if available
-- **Stack trace**: key frames (omit Spark internals unless relevant)
-- **Correlation**: link to stage metrics, executor loss events, or config issues
-- **Suggested action**: concrete fix
+3. **Correlate with API data**: If you have the same app via MCP, use `get_stage_attempt` (failed tasks), `get_all_executors` (dead executors, GC), and `get_job_detail` (failed stages) to match errors to stages and executors.
+4. **Code location**: If the stack trace includes user code (non-Spark frames), note file and line for the review-spark-code skill.
+5. **Output per issue**: Error type, location (driver/executor, stage id if known), key stack frames, correlation to stage/executor metrics, suggested action.
+
+## Note
+
+Event logs can be downloaded from the Spark REST API (`/applications/[base-app-id]/logs` or `.../[attempt-id]/logs`). If the user has those or run output, use this skill on the content they provide.
