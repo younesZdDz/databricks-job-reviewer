@@ -180,23 +180,16 @@ Load in your shell when needed:
 export $(grep -v '^#' .env | xargs)
 ```
 
-### 3. Test the MCP server
 
-From the project root (with env vars set):
+### 3. Install the plugin into Cursor (first time)
 
-```bash
-python3 mcp-servers/databricks/server.py
-```
-
-Press `Ctrl+C` to stop. If you see `ERROR: Set DATABRICKS_HOST and DATABRICKS_TOKEN`, env vars are not loaded.
-
-Optional : run with the MCP CLI inspector (browser UI to call tools):
+Run the install script so Cursor picks up the plugin from this repo:
 
 ```bash
-mcp dev mcp-servers/databricks/server.py
+bash scripts/install-plugin.sh
 ```
 
-Note: Most tools require a valid **cluster_id** (and optional **app_id**). Use a running cluster’s ID from your workspace.
+Then restart Cursor (or **Cmd+Shift+P** → “Reload Window”; a full restart is more reliable).
 
 ### 4. Load the plugin in Cursor (local dev)
 
@@ -205,6 +198,18 @@ Note: Most tools require a valid **cluster_id** (and optional **app_id**). Use a
 3. Check **Settings → Rules**, **Settings → MCP** (`databricks` green), and in Agent chat type `/` (the `/review-spark-job` command).
 
 The MCP server is started by Cursor using `mcp.json`; it needs `DATABRICKS_HOST` and `DATABRICKS_TOKEN` in the environment (or where Cursor reads env for MCP).
+
+### The Dev Loop (how to test changes)
+
+It’s simple and it’s not pretty:
+
+1. **Edit** your plugin sources in your repo.
+2. **Run** `bash scripts/install-plugin.sh`.
+3. **Restart** Cursor (Cmd+Shift+P → “Reload Window” sometimes works; a full restart is safer).
+4. **Test** your commands, skills, and rules in the agent.
+5. **Repeat.**
+
+There’s no hot-reload, no watch mode, no incremental updates. You copy files, you restart, you test. It’s the kind of workflow that makes you appreciate how spoiled we are with frontend dev servers:but it works, and right now it’s the only way to iterate on Cursor plugins without publishing to the marketplace.
 
 ### 5. Project layout for contributors
 
