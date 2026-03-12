@@ -30,7 +30,7 @@ Set up an automation so that when a job’s performance **exceeds a threshold** 
 
 ---
 
-## For users : Install from the Marketplace
+## For users : Install from the Marketplace (Coming soon)
 
 ### 1. Install the plugin
 
