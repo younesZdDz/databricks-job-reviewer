@@ -24,6 +24,10 @@ Given **cluster_id**, **code file path** (required), and optional **app_id**, th
 | **Join efficiency** | Sort-merge vs broadcast with evidence from SQL plan |
 | **Anti-patterns** | `.collect()`, UDFs, cross joins, bad repartition : with file:line (code file required) |
 
+### Interesting use case: automated performance alerts
+
+Set up an automation so that when a job’s performance **exceeds a threshold** (e.g. duration or failure), the agent runs automatically to analyze that run and **open an issue** with the report and suggested improvements. For example, use [Cursor automations](https://cursor.com/docs/cloud-agent/automations) (or your CI/monitoring) to trigger on a Databricks job alert, then invoke the review command with the cluster and code path; the agent’s output can be posted into a GitHub/GitLab issue or a Slack thread so the team gets evidence-based recommendations without manual triage.
+
 ---
 
 ## For users : Install from the Marketplace
@@ -60,6 +64,8 @@ If Cursor doesn’t inherit your shell env, set these in your OS user environmen
 
 All usage happens in **Cursor Agent chat**. One command does both **analysis** (runtime: SQL/jobs → stages → quantiles → executors) and **code review** (anti-patterns, file:line links).
 
+**Note:** The plugin assumes the **cluster is already running**. It does not start or manage clusters; you must use a cluster that is up so the driver-proxy Spark UI is reachable.
+
 ### Command
 
 | Command | What it does |
@@ -68,7 +74,7 @@ All usage happens in **Cursor Agent chat**. One command does both **analysis** (
 
 **Inputs:**
 
-- **cluster_id** (required): Databricks cluster ID.
+- **cluster_id** (required): Databricks cluster ID (cluster must be running).
 - **Code file path** (required): Local path to the task/job source (e.g. `@src/jobs/daily_etl.py`).
 - **app_id** (optional): Spark application ID. If omitted, the latest application is used (first from the cluster).
 
@@ -237,6 +243,13 @@ Create `rules/<name>.mdc` with frontmatter (`description`, `alwaysApply`, option
 ### 9. Adding a new command
 
 Create `commands/<name>.md` with frontmatter (`name`, `description`) and steps. It appears as `/<name>` in Agent chat.
+
+---
+
+## Planned improvements
+
+- **Filter jobs by Spark job group** : When a cluster runs multiple tasks, it’s hard to tell which jobs belong to the task you’re reviewing. In your task code you can set a job group, e.g. `spark.sparkContext.setJobGroup("example", "Example execution")`. The Spark UI `/jobs` endpoint returns a `jobGroup` (and `jobGroupId`) in each job. The plugin could accept an optional job group and filter to only analyze jobs that match, so findings are scoped to that task.
+- **Support stopped clusters** : Today the plugin assumes the cluster is running because it uses the driver-proxy Spark UI. A future improvement is to support analyzing past runs from clusters that are already stopped, e.g. by using Spark event logs or a history server so you can review completed jobs without keeping the cluster up.
 
 ---
 
