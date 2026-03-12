@@ -195,6 +195,8 @@ Run the install script so Cursor picks up the plugin from this repo:
 bash scripts/install-plugin.sh
 ```
 
+*(Script approach based on [How to write and test Cursor plugins locally (the part the docs don’t tell you)](https://medium.com/@v.tajzich/how-to-write-and-test-cursor-plugins-locally-the-part-the-docs-dont-tell-you-4eee705d7f76).)*
+
 Then restart Cursor (or **Cmd+Shift+P** → “Reload Window”; a full restart is more reliable).
 
 ### 4. Load the plugin in Cursor (local dev)
