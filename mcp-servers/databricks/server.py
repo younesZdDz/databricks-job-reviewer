@@ -18,10 +18,21 @@ User provides: cluster_id, code file path (required), and optional app_id
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+
+# Load credentials from a .env file next to this script (if present).
+# Explicit environment variables always take precedence (setdefault).
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _, _v = _line.partition("=")
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 DATABRICKS_HOST = os.environ.get("DATABRICKS_HOST", "").rstrip("/")
 DATABRICKS_TOKEN = os.environ.get("DATABRICKS_TOKEN", "")

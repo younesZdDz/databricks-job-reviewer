@@ -16,6 +16,5 @@
   "agents": "agents/",
   "skills": "skills/",
   "commands": "commands/",
-  "mcpServers": "mcp.json",
   "license": "MIT"
 }
